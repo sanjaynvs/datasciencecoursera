@@ -1,0 +1,176 @@
+---
+title: "Practical LM Project - Week 4"
+author: "Sanjay P Joshi"
+date: "October 6, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Import all the required libraries
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+```
+
+## Importing data
+
+Let us first import the data
+
+```{r importData}
+trainData <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"))
+testData <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+```
+
+## Understanding the data
+
+To understand the data, let us examine the training data set with `str` command
+```{r understandingData}
+str(trainData)
+```
+
+Looking through this, we identify the following...
+
+1. This is a large data set with 160 columns
+2. An unspecified number of columns seem to have large `NA` values
+3. An unspecified number of columns seem to have large number of blank values.
+
+Let us understand this further...
+
+  -  First the NAs
+
+```{r naInfo}
+naCols <- colSums(is.na(trainData))
+table(naCols)
+```
+
+  -  Next the blanks
+```{r blankInfo}
+blankCols<-apply(X = trainData, MARGIN = 2, FUN = function(x){sum(x[!is.na(x)]=="")})
+#Note this...x[!is.na(x)] is used as if there are NA values, the columns will return NA
+table(blankCols)
+```
+
+## Cleaning the data
+
+1.  We thus see 100 columns having a large number (19216) of values being either blank or `NA`s. It make no sense to keep them. Thus we shall remove these columns from our analysis.
+
+```{r firstCleanup}
+removeCols <- c(names(blankCols[blankCols==19216]),names(naCols[naCols==19216]))
+cTrainData <- trainData[,!(names(trainData) %in% removeCols)]
+cTestData<- testData[,!(names(trainData) %in% removeCols)]
+
+```
+2.  Let us clear near zero variance columns
+
+```{r getNzv}
+nzv <- nearZeroVar(cTrainData)
+cTrainData <- cTrainData[, -nzv]
+cTestData <- cTestData[,-nzv]
+```
+
+3.  We can also ignore the first 6 columns...
+```{r remTS}
+cTrainData <- cTrainData[,-c(1:6)]
+cTestData <- cTestData[,-c(1:6)]
+```
+
+Having done all the cleanup's let us check our data now.
+
+```{r checkClearData}
+dim(cTrainData)
+dim(cTestData)
+```
+
+We end up with 53 columns.
+
+## Data preparation for applying algorithms
+
+To implement prediction algorithms, let us divide our training data set further, and apply predictions algorithm to do a check.
+```{r divTrainSet}
+
+set.seed(5432)
+div1 <- createDataPartition(cTrainData$classe, p=0.75, list=FALSE)
+trainDataDiv1 <- cTrainData[div1,]
+trainDataDiv2 <- cTrainData[-div1,]
+dim(trainDataDiv1)
+```
+## Cross validation
+
+Let us also use cross validation uptil 5 levels.
+```{r cvMod}
+trnCtrl <- trainControl(method="cv", number=5)
+# to be used as a control in the upcoming training algorithms.
+```
+
+## Applying training models.
+
+We shall apply the following models, and check for the one with highest efficiency, in our test set.
+
+-    Classification trees
+-    GBM
+-    Random Forest
+
+### Classification tree
+Let us apply for the classification tree alogorithm.
+```{r rPartMod}
+rPartMod <- train(classe~., data=trainDataDiv1, method="rpart", trControl=trnCtrl)
+fancyRpartPlot(rPartMod$finalModel)
+```
+
+Let us now predict or our sample test data drawn out of training data and check the accuracy of this model...
+
+```{r checkRPartMod}
+predRPart <- predict(rPartMod,newdata=trainDataDiv2)
+confMat <-confusionMatrix(table(predRPart,trainDataDiv2$classe))
+confMat$overall["Accuracy"]
+```
+
+We see the accuracy is **49.16%** for classification trees
+
+### Gradient Boosting Method(GBM)
+Let us now train with gradient boosting method.
+
+```{r gbmMod}
+modGBM <- train(classe~., data=trainDataDiv1, method="gbm", trControl=trnCtrl, verbose=FALSE)
+plot(modGBM)
+```
+
+Like we did above, we will apply this to test data obtained from dividing the training data and check the accuracy.
+```{r}
+predGBMTrain <- predict(modGBM,newdata=trainDataDiv2)
+confMatGBM <- confusionMatrix(table(predGBMTrain,trainDataDiv2$classe))
+confMatGBM$overall["Accuracy"]
+```
+
+### Random Forest
+Let us now train with random forests method.
+```{r trainRF}
+modRF <- train(classe~., data=trainDataDiv1, method="rf", trControl=trnCtrl, verbose=FALSE)
+```
+
+```{r rfPlot}
+plot(modRF)
+```
+
+We will apply this to test data obtained from dividing the training data and check the accuracy
+
+```{r checkRF}
+predRFTrain <- predict(modRF,newdata=trainDataDiv2)
+confMatRF <- confusionMatrix(table(predRFTrain,trainDataDiv2$classe))
+confMatRF$overall["Accuracy"]
+```
+
+## Conclusion
+
+We can see from the above analysis, that the random forest seems to work the best. The expected accuracy is **99.28%**. Thus the **expected out of sample error will be 0.72%**
+
+
+Let us predict on our test set using this model
+
+```{r predictRF}
+testPredVal <- predict(modRF,newdata=cTestData)
+testPredVal
+```
